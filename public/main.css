@@ -1,119 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 body {
-  margin: auto;
-  min-height: 100vh;
-  min-width: 100%;
-  background: var(--ory-theme-background-canvas);
-  display: flex;
-  flex-direction: column;
+  @apply bg-gray-50 min-h-screen;
 }
 
-/* the browser adds margins to these elements by default */
-ul,
-ol,
-p,
-h1,
-h2,
-h3 {
-  margin-top: 0;
-  margin-bottom: 0;
+.auth-container {
+  @apply flex flex-col items-center justify-center min-h-screen p-4;
 }
 
-/* main contains all of our page elements - excluding the footer */
-main {
-  /* fill the page */
-  flex: 1;
+.nav-container {
+  @apply fixed top-0 left-0 w-64 h-full bg-white shadow-lg z-50;
 }
 
-.divider {
-  width: 4rem;
-  margin-top: 2rem;
-  margin-bottom: 2rem;
+.nav-link {
+  @apply flex items-center px-4 py-2 text-gray-700 hover:bg-primary-50 hover:text-primary-600;
 }
 
-.spacing-32 {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
+.nav-link.active {
+  @apply bg-primary-50 text-primary-600;
 }
 
-.spacing-32-horizontal {
-  display: flex;
-  flex-direction: row;
-  gap: 2rem;
+.nav-icon {
+  @apply w-5 h-5 mr-3;
 }
 
-.spacing-16 {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+.content-container {
+  @apply ml-64 p-8;
 }
 
-.spacing-16-horizontal {
-  display: flex;
-  flex-direction: row;
-  gap: 1rem;
+.card {
+  @apply bg-white rounded-lg shadow-md p-6;
 }
 
-.spacing-8 {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+.btn-primary {
+  @apply bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
 }
 
-.divider-left {
-  margin: 0;
+.btn-secondary {
+  @apply bg-secondary-100 text-secondary-700 px-4 py-2 rounded hover:bg-secondary-200 focus:outline-none focus:ring-2 focus:ring-secondary-500 focus:ring-offset-2;
 }
 
-.ory-branding {
-  display: flex;
-  flex-direction: row;
-  gap: 0.375rem;
-  align-items: center;
-  padding-bottom: 2rem;
+.input-field {
+  @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
 }
 
-/* only manage the nav */
-.main-nav {
-  min-width: 18.75rem;
-  position: fixed;
-  height: auto;
-  z-index: 1;
+.form-label {
+  @apply block text-sm font-medium text-gray-700 mb-1;
 }
 
-footer {
-  position: fixed;
-  bottom: 0;
-  width: 100%;
-  z-index: 2;
+.error-text {
+  @apply text-red-600 text-sm mt-1;
 }
 
-/* pushes the menu links to either side of the footer bar */
-.footer-container {
-  padding: 1rem 1.5rem;
-  font-style: normal;
-  font-weight: 400;
-  font-size: 1rem;
-  line-height: 1.75rem;
-  display: flex;
-  justify-content: space-between;
-  text-decoration: none;
-  color: var(--ory-theme-foreground-muted);
-  background-color: var(--ory-theme-background-surface);
-}
-
-.footer-divider {
-  height: 0;
-  border-top: 1px !important;
-}
-
-@media screen and (max-width: 24.375em) {
-  .footer-container > div:last-child {
-    display: none;
-  }
-}
-
-@media screen and (max-width: 40em) {
-  body {
-    background: var(--ory-theme-background-surface);
-  }
+.success-text {
+  @apply text-green-600 text-sm mt-1;
 }
