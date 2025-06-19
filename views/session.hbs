@@ -27,7 +27,18 @@
      </div>
   </div>
   
-  {{{divider false "divider-left"}}}
+  {{#if hasOidcCredentials}}
+   <div class="spacing-32">
+     {{{typography "OAuth 2.0 Credentials" "headline37" "foregroundDefault"}}}
+     {{{typography "Below are the OAuth 2.0 tokens retrieved from your identity credentials" "small" "foregroundMuted"}}}
+   </div>
+
+   <div class="spacing-32-horizontal wrap-content">
+     {{{oidcTokensCodeBox}}}
+   </div>
+   {{/if}}
+
+   {{{divider false "divider-left"}}}
 
 <script type="application/javascript">
   // Get the current breakpoint

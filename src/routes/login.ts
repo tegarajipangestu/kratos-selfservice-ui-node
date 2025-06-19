@@ -30,6 +30,7 @@ export const createLoginRoute: RouteCreator =
     const { frontend, kratosBrowserUrl, logoUrl, extraPartials } =
       createHelpers(req, res)
 
+    // Initialize login flow query parameters
     const initFlowQuery = new URLSearchParams({
       aal: aal.toString(),
       refresh: refresh.toString(),
@@ -127,6 +128,7 @@ export const createLoginRoute: RouteCreator =
     return frontend
       .getLoginFlow({ id: flow, cookie: req.header("cookie") })
       .then(async ({ data: flow }) => {
+        // We'll handle adding upstream parameters through a custom script in the template
         if (flow.ui.messages && flow.ui.messages.length > 0) {
           // the login requires that the user verifies their email address before logging in
           if (flow.ui.messages.some(({ id }) => id === 4000010)) {
