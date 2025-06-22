@@ -54,25 +54,6 @@ body {
   gap: 2rem;
 }
 
-/* OIDC tokens scrollable container */
-.oidc-tokens-scrollable pre {
-  max-height: 400px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.oidc-tokens-code-box {
-  width: 100%;
-  margin-bottom: 2rem;
-}
-
-.spacing-32 {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
 .nav-icon {
   @apply w-5 h-5 mr-3;
 }
