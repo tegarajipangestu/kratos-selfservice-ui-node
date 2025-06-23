@@ -12,6 +12,11 @@ import { AcceptOAuth2ConsentRequestSession } from "@ory/client"
 import { UserConsentCard } from "@ory/elements-markup"
 import { Request, Response, NextFunction } from "express"
 
+// Get auto-accept client IDs from environment variable
+// Format: comma-separated list of client IDs that should auto-accept consent
+const AUTO_ACCEPT_CLIENTS = process.env.AUTO_ACCEPT_CLIENT_IDS?.split(',').map(id => id.trim()) || [];
+console.log(`Configured auto-accept clients: ${AUTO_ACCEPT_CLIENTS.join(', ') || 'None'}`);
+
 const extractSession = (
   req: Request,
   grantScope: string[],
@@ -26,6 +31,7 @@ const extractSession = (
     return session
   }
 
+  // Extract standard OIDC claims
   if (grantScope.includes("email")) {
     const addresses = identity.verifiable_addresses || []
     if (addresses.length > 0) {
@@ -63,20 +69,19 @@ const extractSession = (
       )
     }
   }
+  
   return session
 }
 
 // A simple express handler that shows the Hydra consent screen.
 export const createConsentRoute: RouteCreator =
-  (createHelpers) =>
-  async (req: Request, res: Response, next: NextFunction) => {
+  (createHelpers) => async (req: Request, res: Response, next: NextFunction) => {
     res.locals.projectName = "Consent"
-
     const {
       oauth2,
       isOAuthConsentRouteEnabled,
-      shouldSkipConsent: canSkipConsent,
       logoUrl,
+      identity,
     } = createHelpers(req, res)
 
     if (!isOAuthConsentRouteEnabled()) {
@@ -84,49 +89,158 @@ export const createConsentRoute: RouteCreator =
       return
     }
 
-    const { consent_challenge } = req.query
-
-    // The challenge is used to fetch information about the consent request from ORY hydraAdmin.
-    const challenge = String(consent_challenge)
+    // The challenge is used to fetch information about the consent request from ORY Hydra.
+    const challenge = String(req.query.consent_challenge)
     if (!challenge) {
-      next(
-        new Error("Expected a consent challenge to be set but received none."),
-      )
+      next(new Error('Expected a consent challenge to be set but received none.'))
       return
     }
 
-    // This section processes consent requests and either shows the consent UI or
-    // accepts the consent request right away if the user has given consent to this
-    // app before
-    await oauth2
-      .getOAuth2ConsentRequest({ consentChallenge: challenge })
+    // Let's check if ory hydra deployed at the HYDRA_ADMIN_URL environment variable, if not fallback to ORY_SDK_URL
+    oauth2
+      .getOAuth2ConsentRequest({consentChallenge: challenge})
       // This will be called if the HTTP request was successful
-      .then(async ({ data: body }) => {
-        // If a user has granted this application the requested scope, hydra will tell us to not show the UI.
-        if (canSkipConsent(body)) {
-          logger.debug("Skipping consent request and accepting it.")
-          let grantScope = body.requested_scope || []
-          const session = extractSession(req, grantScope)
+      .then(async ({data: body}) => {
+        // If a user has authenticated with Ory Kratos, they'll have a session cookie from Kratos. And, if it was set to remember them,
+        // they'll have a long-lived cookie. We don't need to check that here though, we just need to make sure
+        // that Hydra still considers their login valid.
 
-          // Now it's time to grant the consent request. You could also deny the request if something went terribly wrong
-          await oauth2
+        // If consent can't be skipped we will redirect the browser to the consent UI
+        const clientId = body.client?.client_id;
+        const clientName = body.client?.client_name || 'Unknown Client';
+        const requestedScopes = body.requested_scope || [];
+        const clientMetadata = body.client?.metadata as Record<string, any> || {};
+        
+        // Check if this client ID should auto-accept consent based on environment variable
+        const shouldAutoAccept = clientId && AUTO_ACCEPT_CLIENTS.includes(clientId);
+        
+        console.log('Consent decision for client', {
+          client_id: clientId,
+          client_name: clientName,
+          hydra_says_skip: body.skip,
+          auto_accept_client: shouldAutoAccept,
+          will_skip_consent: body.skip || shouldAutoAccept
+        });
+                    
+        // Check if skip is true from Hydra or if client is in auto-accept list
+        if (body.skip || shouldAutoAccept) {
+          // But if are able to skip it, let's go ahead and grant the requested scopes
+          // Either Hydra told us to skip the consent screen or the client ID is in our auto-accept list
+          const skipReason = body.skip ? 'Hydra skip flag' : 'auto-accept client list';
+          console.log(`Consent request will be skipped (reason: ${skipReason})`);
+
+          const grantScope = body.requested_scope || []
+          const session = extractSession(req, grantScope)
+          
+          // Add Google OIDC tokens if we have an identity
+          if (req.session?.identity?.id) {
+            try {
+              // Call the admin API to get the identity with OIDC credentials
+              console.log("Fetching identity with OIDC credentials for auto-consent", {
+                identityId: req.session.identity.id
+              })
+              
+              const { data: identityDetails } = await identity.getIdentity({
+                id: req.session.identity.id,
+                includeCredential: ["oidc"],
+              })
+              
+              // Log the identity traits to debug if Google attributes exist
+              console.log('Identity traits retrieved from Kratos:', {
+                has_traits: !!identityDetails.traits,
+                trait_keys: identityDetails.traits ? Object.keys(identityDetails.traits) : [],
+                google_sub: identityDetails.traits?.google_sub,
+                name: identityDetails.traits?.name,
+                email: identityDetails.traits?.email
+              })
+
+              // Extract OIDC credentials if they exist
+              if (identityDetails.credentials?.oidc?.config) {
+                // Cast to appropriate type since we know the structure from the API
+                const oidcConfig = identityDetails.credentials.oidc.config as {
+                  providers?: Array<{
+                    provider: string
+                    initial_id_token?: string
+                    initial_access_token?: string
+                    initial_refresh_token?: string
+                  }>
+                }
+
+                // Find Google provider if it exists
+                const googleProvider = oidcConfig.providers?.find(
+                  (p) => p.provider === "google"
+                )
+
+                if (googleProvider) {
+                  console.log("Found Google OIDC provider for auto-consent")
+
+                  if (!session.access_token.google) {
+                    session.access_token.google = {}
+                  }      
+                  
+                  if (googleProvider.initial_id_token) {
+                    session.access_token.google.google_id_token = googleProvider.initial_id_token
+                  }
+                  
+                  if (googleProvider.initial_access_token) {
+                    session.access_token.google.google_access_token = googleProvider.initial_access_token
+                  }
+                  
+                  if (googleProvider.initial_refresh_token) {
+                    session.access_token.google.google_refresh_token = googleProvider.initial_refresh_token
+                  }
+
+                  if (identityDetails.traits?.google_sub) {
+                    session.access_token.google.sub = identityDetails.traits.google_sub
+                    session.access_token.google.name = identityDetails.traits.name
+                    session.access_token.google.email = identityDetails.traits.email
+              
+                    console.log("Added Google subject ID to consent session", {
+                      google_sub: identityDetails.traits.google_sub
+                    })
+                  }
+
+                  console.log("Added Google tokens to auto-consent session", {
+                    has_id_token: !!googleProvider.initial_id_token,
+                    has_access_token: !!googleProvider.initial_access_token,
+                    has_refresh_token: !!googleProvider.initial_refresh_token,
+                  })
+                }
+              }
+            } catch (error) {
+              console.log("Error retrieving Google tokens for auto-consent", { error })
+              // Continue with base session data even if token retrieval fails
+            }
+          }
+
+          // Now it's time to grant the consent request. We could also deny the request if something went terribly wrong
+          return oauth2
             .acceptOAuth2ConsentRequest({
+              // To accept the consent request, we need to pass the challenge to Hydra
               consentChallenge: challenge,
+
+              // ORY Hydra checks if requested audiences are allowed by the client, so we can simply echo this.
               acceptOAuth2ConsentRequest: {
-                // We can grant all scopes that have been requested - hydra already checked for us that no additional scopes
-                // are requested accidentally.
                 grant_scope: grantScope,
+
+                // The session allows us to set session data for id and access tokens
+                // Using the oidcConformityMaybeFakeSession wrapper for test compatibility
+                session: oidcConformityMaybeFakeSession(grantScope, session),
 
                 // ORY Hydra checks if requested audiences are allowed by the client, so we can simply echo this.
                 grant_access_token_audience:
                   body.requested_access_token_audience,
 
-                // The session allows us to set session data for id and access tokens
-                session,
+                // This tells hydra to remember this consent request and allow the same client to request the same
+                // scopes from the same user, without showing the UI, in the future.
+                remember: true,
+
+                // When this is set, the consent will be remembered for 1 hour
+                remember_for: 3600,
               },
             })
-            .then(({ data: body }) => {
-              logger.debug("Consent request successfuly accepted")
+            .then(({data: body}) => {
+              console.log('Consent request was accepted')
               // All we need to do now is to redirect the user back to hydra!
               res.redirect(String(body.redirect_to))
             })
@@ -172,7 +286,7 @@ export const createConsentPostRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
     res.locals.projectName = "Consent"
     // The challenge is a hidden input field, so we have to retrieve it from the request body
-    const { oauth2, isOAuthConsentRouteEnabled } = createHelpers(req, res)
+    const { oauth2, isOAuthConsentRouteEnabled, identity } = createHelpers(req, res)
 
     if (!isOAuthConsentRouteEnabled()) {
       res.redirect("404")
@@ -190,14 +304,87 @@ export const createConsentPostRoute: RouteCreator =
     if (!Array.isArray(grantScope)) {
       grantScope = [grantScope]
     }
-    // extractSession only gets the sesseion data from the request
-    // You can extract more data from the Ory Identities admin API
+
+    // First get the base session data from the request
     const session = extractSession(req, grantScope)
+
+    // Add Google OIDC tokens if we have an identity
+    if (req.session?.identity?.id) {
+      try {
+        // Call the admin API to get the identity with OIDC credentials
+        console.log("Fetching identity with OIDC credentials for consent", {
+          identityId: req.session.identity.id
+        })
+        
+        const { data: identityDetails } = await identity.getIdentity({
+          id: req.session.identity.id,
+          includeCredential: ["oidc"],
+        })
+
+        // Extract OIDC credentials if they exist
+        if (identityDetails.credentials?.oidc?.config) {
+          // Cast to appropriate type since we know the structure from the API
+          const oidcConfig = identityDetails.credentials.oidc.config as {
+            providers?: Array<{
+              provider: string
+              initial_id_token?: string
+              initial_access_token?: string
+              initial_refresh_token?: string
+            }>
+          }
+
+          // Find Google provider if it exists
+          const googleProvider = oidcConfig.providers?.find(
+            (p) => p.provider === "google"
+          )
+
+          if (googleProvider) {
+            console.log("Found Google OIDC provider for consent")
+            
+            if (!session.access_token.google) {
+              session.access_token.google = {}
+            }
+
+            if (googleProvider.initial_id_token) {
+              session.access_token.google.google_id_token = googleProvider.initial_id_token
+            }
+            
+            if (googleProvider.initial_access_token) {
+              session.access_token.google.google_access_token = googleProvider.initial_access_token
+            }
+            
+            if (googleProvider.initial_refresh_token) {
+              session.access_token.google.google_refresh_token = googleProvider.initial_refresh_token
+            }
+            
+            // Add Google subject ID from identity traits if available
+            if (identityDetails.traits?.google_sub) {
+              session.access_token.google.sub = identityDetails.traits.google_sub
+              session.access_token.google.name = identityDetails.traits.name
+              session.access_token.google.email = identityDetails.traits.email
+              
+              console.log("Added Google subject ID to consent session", {
+                google_sub: identityDetails.traits.google_sub
+              })
+            }
+
+            console.log("Added Google tokens to consent session", {
+              has_id_token: !!googleProvider.initial_id_token,
+              has_access_token: !!googleProvider.initial_access_token,
+              has_refresh_token: !!googleProvider.initial_refresh_token,
+            })
+          }
+        }
+      } catch (error) {
+        logger.error("Error retrieving Google tokens for consent", { error })
+        // Continue with base session data even if token retrieval fails
+      }
+    }
 
     // Let's fetch the consent request again to be able to set `grantAccessTokenAudience` properly.
     // Let's see if the user decided to accept or reject the consent request..
     if (consent_action === "accept") {
-      logger.debug("Consent request was accepted by the user")
+      console.log("Consent request was accepted by the user")
       await oauth2
         .getOAuth2ConsentRequest({
           consentChallenge: String(challenge),
@@ -211,19 +398,16 @@ export const createConsentPostRoute: RouteCreator =
                 // are requested accidentally.
                 grant_scope: grantScope,
 
-                // If the environment variable CONFORMITY_FAKE_CLAIMS is set we are assuming that
-                // the app is built for the automated OpenID Connect Conformity Test Suite. You
-                // can peak inside the code for some ideas, but be aware that all data is fake
-                // and this only exists to fake a login system which works in accordance to OpenID Connect.
-                //
-                // If that variable is not set, the session will be used as-is.
-                session: oidcConformityMaybeFakeSession(grantScope, session),
-
                 // ORY Hydra checks if requested audiences are allowed by the client, so we can simply echo this.
                 grant_access_token_audience:
                   body.requested_access_token_audience,
-
-                // This tells hydra to remember this consent request and allow the same client to request the same
+                
+                // If the environment variable CONFORMITY_FAKE_CLAIMS is set we are assuming that
+                // the app is built for the automated OpenID Connect Conformity Test Suite.
+                // Otherwise, use our session with Google tokens included
+                session: oidcConformityMaybeFakeSession(grantScope, session),
+                
+                // Remember the consent
                 // scopes from the same user, without showing the UI, in the future.
                 remember: Boolean(remember),
 
@@ -235,7 +419,7 @@ export const createConsentPostRoute: RouteCreator =
             })
             .then(({ data: body }) => {
               const redirectTo = String(body.redirect_to)
-              logger.debug("Consent request successfuly accepted", redirectTo)
+              console.log("Consent request successfuly accepted", redirectTo)
               // All we need to do now is to redirect the user back!
               res.redirect(redirectTo)
             })
@@ -244,7 +428,7 @@ export const createConsentPostRoute: RouteCreator =
       return
     }
 
-    logger.debug("Consent request denied by the user")
+    console.log("Consent request denied by the user")
 
     // Looks like the consent request was denied by the user
     await oauth2
