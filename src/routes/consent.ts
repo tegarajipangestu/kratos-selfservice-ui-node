@@ -14,8 +14,11 @@ import { Request, Response, NextFunction } from "express"
 
 // Get auto-accept client IDs from environment variable
 // Format: comma-separated list of client IDs that should auto-accept consent
-const AUTO_ACCEPT_CLIENTS = process.env.AUTO_ACCEPT_CLIENT_IDS?.split(',').map(id => id.trim()) || [];
-console.log(`Configured auto-accept clients: ${AUTO_ACCEPT_CLIENTS.join(', ') || 'None'}`);
+const AUTO_ACCEPT_CLIENTS =
+  process.env.AUTO_ACCEPT_CLIENT_IDS?.split(",").map((id) => id.trim()) || []
+console.log(
+  `Configured auto-accept clients: ${AUTO_ACCEPT_CLIENTS.join(", ") || "None"}`,
+)
 
 const extractSession = (
   req: Request,
@@ -69,20 +72,17 @@ const extractSession = (
       )
     }
   }
-  
+
   return session
 }
 
 // A simple express handler that shows the Hydra consent screen.
 export const createConsentRoute: RouteCreator =
-  (createHelpers) => async (req: Request, res: Response, next: NextFunction) => {
+  (createHelpers) =>
+  async (req: Request, res: Response, next: NextFunction) => {
     res.locals.projectName = "Consent"
-    const {
-      oauth2,
-      isOAuthConsentRouteEnabled,
-      logoUrl,
-      identity,
-    } = createHelpers(req, res)
+    const { oauth2, isOAuthConsentRouteEnabled, logoUrl, identity } =
+      createHelpers(req, res)
 
     if (!isOAuthConsentRouteEnabled()) {
       res.redirect("404")
@@ -92,66 +92,77 @@ export const createConsentRoute: RouteCreator =
     // The challenge is used to fetch information about the consent request from ORY Hydra.
     const challenge = String(req.query.consent_challenge)
     if (!challenge) {
-      next(new Error('Expected a consent challenge to be set but received none.'))
+      next(
+        new Error("Expected a consent challenge to be set but received none."),
+      )
       return
     }
 
     // Let's check if ory hydra deployed at the HYDRA_ADMIN_URL environment variable, if not fallback to ORY_SDK_URL
     oauth2
-      .getOAuth2ConsentRequest({consentChallenge: challenge})
+      .getOAuth2ConsentRequest({ consentChallenge: challenge })
       // This will be called if the HTTP request was successful
-      .then(async ({data: body}) => {
+      .then(async ({ data: body }) => {
         // If a user has authenticated with Ory Kratos, they'll have a session cookie from Kratos. And, if it was set to remember them,
         // they'll have a long-lived cookie. We don't need to check that here though, we just need to make sure
         // that Hydra still considers their login valid.
 
         // If consent can't be skipped we will redirect the browser to the consent UI
-        const clientId = body.client?.client_id;
-        const clientName = body.client?.client_name || 'Unknown Client';
-        const requestedScopes = body.requested_scope || [];
-        const clientMetadata = body.client?.metadata as Record<string, any> || {};
-        
+        const clientId = body.client?.client_id
+        const clientName = body.client?.client_name || "Unknown Client"
+        const requestedScopes = body.requested_scope || []
+        const clientMetadata =
+          (body.client?.metadata as Record<string, any>) || {}
+
         // Check if this client ID should auto-accept consent based on environment variable
-        const shouldAutoAccept = clientId && AUTO_ACCEPT_CLIENTS.includes(clientId);
-        
-        console.log('Consent decision for client', {
+        const shouldAutoAccept =
+          clientId && AUTO_ACCEPT_CLIENTS.includes(clientId)
+
+        console.log("Consent decision for client", {
           client_id: clientId,
           client_name: clientName,
           hydra_says_skip: body.skip,
           auto_accept_client: shouldAutoAccept,
-          will_skip_consent: body.skip || shouldAutoAccept
-        });
-                    
+          will_skip_consent: body.skip || shouldAutoAccept,
+        })
+
         // Check if skip is true from Hydra or if client is in auto-accept list
         if (body.skip || shouldAutoAccept) {
           // But if are able to skip it, let's go ahead and grant the requested scopes
           // Either Hydra told us to skip the consent screen or the client ID is in our auto-accept list
-          const skipReason = body.skip ? 'Hydra skip flag' : 'auto-accept client list';
-          console.log(`Consent request will be skipped (reason: ${skipReason})`);
+          const skipReason = body.skip
+            ? "Hydra skip flag"
+            : "auto-accept client list"
+          console.log(`Consent request will be skipped (reason: ${skipReason})`)
 
           const grantScope = body.requested_scope || []
           const session = extractSession(req, grantScope)
-          
+
           // Add Google OIDC tokens if we have an identity
           if (req.session?.identity?.id) {
             try {
               // Call the admin API to get the identity with OIDC credentials
-              console.log("Fetching identity with OIDC credentials for auto-consent", {
-                identityId: req.session.identity.id
-              })
-              
+              console.log(
+                "Fetching identity with OIDC credentials for auto-consent",
+                {
+                  identityId: req.session.identity.id,
+                },
+              )
+
               const { data: identityDetails } = await identity.getIdentity({
                 id: req.session.identity.id,
                 includeCredential: ["oidc"],
               })
-              
+
               // Log the identity traits to debug if Google attributes exist
-              console.log('Identity traits retrieved from Kratos:', {
+              console.log("Identity traits retrieved from Kratos:", {
                 has_traits: !!identityDetails.traits,
-                trait_keys: identityDetails.traits ? Object.keys(identityDetails.traits) : [],
+                trait_keys: identityDetails.traits
+                  ? Object.keys(identityDetails.traits)
+                  : [],
                 google_sub: identityDetails.traits?.google_sub,
                 name: identityDetails.traits?.name,
-                email: identityDetails.traits?.email
+                email: identityDetails.traits?.email,
               })
 
               // Extract OIDC credentials if they exist
@@ -168,7 +179,7 @@ export const createConsentRoute: RouteCreator =
 
                 // Find Google provider if it exists
                 const googleProvider = oidcConfig.providers?.find(
-                  (p) => p.provider === "google"
+                  (p) => p.provider === "google",
                 )
 
                 if (googleProvider) {
@@ -176,27 +187,33 @@ export const createConsentRoute: RouteCreator =
 
                   if (!session.access_token.google) {
                     session.access_token.google = {}
-                  }      
-                  
+                  }
+
                   if (googleProvider.initial_id_token) {
-                    session.access_token.google.google_id_token = googleProvider.initial_id_token
+                    session.access_token.google.google_id_token =
+                      googleProvider.initial_id_token
                   }
-                  
+
                   if (googleProvider.initial_access_token) {
-                    session.access_token.google.google_access_token = googleProvider.initial_access_token
+                    session.access_token.google.google_access_token =
+                      googleProvider.initial_access_token
                   }
-                  
+
                   if (googleProvider.initial_refresh_token) {
-                    session.access_token.google.google_refresh_token = googleProvider.initial_refresh_token
+                    session.access_token.google.google_refresh_token =
+                      googleProvider.initial_refresh_token
                   }
 
                   if (identityDetails.traits?.google_sub) {
-                    session.access_token.google.sub = identityDetails.traits.google_sub
-                    session.access_token.google.name = identityDetails.traits.name
-                    session.access_token.google.email = identityDetails.traits.email
-              
+                    session.access_token.google.sub =
+                      identityDetails.traits.google_sub
+                    session.access_token.google.name =
+                      identityDetails.traits.name
+                    session.access_token.google.email =
+                      identityDetails.traits.email
+
                     console.log("Added Google subject ID to consent session", {
-                      google_sub: identityDetails.traits.google_sub
+                      google_sub: identityDetails.traits.google_sub,
                     })
                   }
 
@@ -208,7 +225,9 @@ export const createConsentRoute: RouteCreator =
                 }
               }
             } catch (error) {
-              console.log("Error retrieving Google tokens for auto-consent", { error })
+              console.log("Error retrieving Google tokens for auto-consent", {
+                error,
+              })
               // Continue with base session data even if token retrieval fails
             }
           }
@@ -239,8 +258,8 @@ export const createConsentRoute: RouteCreator =
                 remember_for: 3600,
               },
             })
-            .then(({data: body}) => {
-              console.log('Consent request was accepted')
+            .then(({ data: body }) => {
+              console.log("Consent request was accepted")
               // All we need to do now is to redirect the user back to hydra!
               res.redirect(String(body.redirect_to))
             })
@@ -286,7 +305,10 @@ export const createConsentPostRoute: RouteCreator =
   (createHelpers) => async (req, res, next) => {
     res.locals.projectName = "Consent"
     // The challenge is a hidden input field, so we have to retrieve it from the request body
-    const { oauth2, isOAuthConsentRouteEnabled, identity } = createHelpers(req, res)
+    const { oauth2, isOAuthConsentRouteEnabled, identity } = createHelpers(
+      req,
+      res,
+    )
 
     if (!isOAuthConsentRouteEnabled()) {
       res.redirect("404")
@@ -313,9 +335,9 @@ export const createConsentPostRoute: RouteCreator =
       try {
         // Call the admin API to get the identity with OIDC credentials
         console.log("Fetching identity with OIDC credentials for consent", {
-          identityId: req.session.identity.id
+          identityId: req.session.identity.id,
         })
-        
+
         const { data: identityDetails } = await identity.getIdentity({
           id: req.session.identity.id,
           includeCredential: ["oidc"],
@@ -335,36 +357,40 @@ export const createConsentPostRoute: RouteCreator =
 
           // Find Google provider if it exists
           const googleProvider = oidcConfig.providers?.find(
-            (p) => p.provider === "google"
+            (p) => p.provider === "google",
           )
 
           if (googleProvider) {
             console.log("Found Google OIDC provider for consent")
-            
+
             if (!session.access_token.google) {
               session.access_token.google = {}
             }
 
             if (googleProvider.initial_id_token) {
-              session.access_token.google.google_id_token = googleProvider.initial_id_token
+              session.access_token.google.google_id_token =
+                googleProvider.initial_id_token
             }
-            
+
             if (googleProvider.initial_access_token) {
-              session.access_token.google.google_access_token = googleProvider.initial_access_token
+              session.access_token.google.google_access_token =
+                googleProvider.initial_access_token
             }
-            
+
             if (googleProvider.initial_refresh_token) {
-              session.access_token.google.google_refresh_token = googleProvider.initial_refresh_token
+              session.access_token.google.google_refresh_token =
+                googleProvider.initial_refresh_token
             }
-            
+
             // Add Google subject ID from identity traits if available
             if (identityDetails.traits?.google_sub) {
-              session.access_token.google.sub = identityDetails.traits.google_sub
+              session.access_token.google.sub =
+                identityDetails.traits.google_sub
               session.access_token.google.name = identityDetails.traits.name
               session.access_token.google.email = identityDetails.traits.email
-              
+
               console.log("Added Google subject ID to consent session", {
-                google_sub: identityDetails.traits.google_sub
+                google_sub: identityDetails.traits.google_sub,
               })
             }
 
@@ -401,12 +427,12 @@ export const createConsentPostRoute: RouteCreator =
                 // ORY Hydra checks if requested audiences are allowed by the client, so we can simply echo this.
                 grant_access_token_audience:
                   body.requested_access_token_audience,
-                
+
                 // If the environment variable CONFORMITY_FAKE_CLAIMS is set we are assuming that
                 // the app is built for the automated OpenID Connect Conformity Test Suite.
                 // Otherwise, use our session with Google tokens included
                 session: oidcConformityMaybeFakeSession(grantScope, session),
-                
+
                 // Remember the consent
                 // scopes from the same user, without showing the UI, in the future.
                 remember: Boolean(remember),
